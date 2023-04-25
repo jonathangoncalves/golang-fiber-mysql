@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -106,12 +107,22 @@ func FindNoteById(c *fiber.Ctx) error {
 	noteId := c.Params("noteId")
 
 	var note models.Note
-	result := initializers.DB.First(&note, "id = ?", noteId)
-	if err := result.Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"status": "fail", "message": "No note with that Id exists"})
+
+	errRedis := initializers.GetCache("note/"+noteId, &note)
+	if errRedis != nil {
+		fmt.Println("Error from cache:", errRedis)
+		result := initializers.DB.First(&note, "id = ?", noteId)
+		if err := result.Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"status": "fail", "message": "No note with that Id exists"})
+			}
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"status": "fail", "message": err.Error()})
 		}
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"status": "fail", "message": err.Error()})
+
+		errRedis = initializers.SetCache("note/"+noteId, note, 60)
+		if errRedis != nil {
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"status": "fail", "message": "Error setting users in cache:" + errRedis.Error()})
+		}
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "data": fiber.Map{"note": note}})
